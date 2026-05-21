@@ -3,20 +3,30 @@ version: '3.8'
 services:
   backend:
     build: ./backend
-
     container_name: po-backend
-
     restart: always
-
     ports:
       - "9000:9000"
-
     volumes:
       - ./backend:/app
-
     environment:
-      DATABASE_URL:  postgresql://postgres:evNwZ4OBJYDO8t-9VHqHr@zervi-pgvector-u34072.vm.elestio.app/odoo_api
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://postgres:evNwZ4OBJYDO8t-9VHqHr@zervi-pgvector-u34072.vm.elestio.app/odoo_api?sslmode=require
+      REDIS_URL: redis://redis:6380/0
+    depends_on:
+      - redis
+
+  celery:
+    build: ./backend
+    container_name: po-celery
+    restart: always
+    command: celery -A app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: postgresql://postgres:evNwZ4OBJYDO8t-9VHqHr@zervi-pgvector-u34072.vm.elestio.app/odoo_api?sslmode=require
+      REDIS_URL: redis://redis:6380/0
+    depends_on:
+      - redis
 
   frontend:
     build: ./frontend
@@ -25,5 +35,30 @@ services:
       - "5100:5100"
     volumes:
       - ./frontend:/app
+      - /app/node_modules
     depends_on:
       - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: po-redis
+    restart: always
+    ports:
+      - "6380:6380"
+
+#   postgres:
+#     image: postgres:16-alpine
+#     container_name: po-postgres
+#     restart: always
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_PASSWORD: postgres
+#       POSTGRES_DB: pochecker
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+#       - pgdata:/var/lib/postgresql/data
+
+# volumes:
+#   pgdata:

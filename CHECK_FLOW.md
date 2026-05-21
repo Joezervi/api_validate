@@ -108,13 +108,4 @@ CREATE TABLE customer_parser_rules (
     price_column INTEGER
 );
 
-CREATE TABLE customer_parser_rules (
-    id SERIAL PRIMARY KEY,
-    customer_name VARCHAR(100),
-    sku_column INTEGER,
-    product_column INTEGER,
-    qty_column INTEGER,
-    price_column INTEGER
-);
-
 ```

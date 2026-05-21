@@ -1,32 +1,34 @@
 from app.db import get_pool
 
 
-async def process_products(products, customer_name):
-
+async def process_products(products, customer_name, po_number=None):
     pool = await get_pool()
 
     existing_products = []
     missing_products = []
 
     async with pool.acquire() as conn:
-
         for item in products:
             sku = item["sku"]
             product_name = item["product_name"]
+
             # staging
             await conn.execute(
                 """
                 INSERT INTO product_staging (
                     customer_name,
+                    po_number,
                     sku,
                     product_name
                 )
-                VALUES ($1, $2, $3)
+                VALUES ($1, $2, $3, $4)
                 """,
                 customer_name,
+                po_number,
                 sku,
                 product_name,
             )
+
             existing = await conn.fetchrow(
                 """
                 SELECT *
@@ -37,7 +39,6 @@ async def process_products(products, customer_name):
             )
 
             if existing:
-                # Add all fields for frontend/Excel
                 existing_products.append(
                     {
                         "sku": existing["sku"],
@@ -55,21 +56,25 @@ async def process_products(products, customer_name):
                         "price": "",
                     }
                 )
+
                 # draft
                 draft = await conn.fetchrow(
                     """
                     INSERT INTO product_draft (
                         sku,
                         product_name,
-                        customer
+                        customer,
+                        source_po
                     )
-                    VALUES ($1, $2, $3)
+                    VALUES ($1, $2, $3, $4)
                     RETURNING id
                     """,
                     sku,
                     product_name,
                     customer_name,
+                    po_number,
                 )
+
                 # approval queue
                 await conn.execute(
                     """

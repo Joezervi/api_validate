@@ -11,13 +11,15 @@ OUTPUT_DIR = "outputs"
 
 
 @celery.task
-def process_po_task(pdf_path, customer_name):
+def process_po_task(pdf_path, customer_name, po_number=None):
 
     parser = get_parser(customer_name)
 
     products = parser.parse(pdf_path)
 
-    result = asyncio.run(process_products(products, customer_name))
+    result = asyncio.run(
+        process_products(products, customer_name, po_number)
+    )
 
     workbook = Workbook()
 
@@ -48,6 +50,7 @@ def process_po_task(pdf_path, customer_name):
 
     excel_filename = f"{uuid.uuid4()}.xlsx"
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     excel_path = os.path.join(OUTPUT_DIR, excel_filename)
 
     workbook.save(excel_path)

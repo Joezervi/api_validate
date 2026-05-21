@@ -7,5 +7,5 @@ DATABASE_URL = os.getenv(
 
 REDIS_URL = os.getenv(
     "REDIS_URL",
-    "redis://localhost:6380/0"
+    "redis://localhost:6379/0"
 )

@@ -2,12 +2,11 @@ fastapi
 uvicorn[standard]
 asyncpg
 sqlalchemy
-psycopg2-binary
 pandas
-pdfplumber
+pdfplumber==0.10.4
+pdfminer.six==20221105
+cryptography==43.0.3
 python-multipart
 aiofiles
 openpyxl
-celery
-redis
 python-dotenv

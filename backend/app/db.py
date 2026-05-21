@@ -33,7 +33,7 @@ async def get_pool():
         if sslmode in ("require", "prefer", "verify-ca", "verify-full"):
             # asyncpg uses True for "require" and a context for stricter modes
             ssl_kwarg = True if sslmode == "require" else sslmode
-
+        print(f"Creating asyncpg pool with SSL mode: {dsn}, {ssl_kwarg}")
         _pool = await asyncpg.create_pool(
             dsn,
             min_size=1,

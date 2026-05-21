@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+asyncpg
+sqlalchemy
+psycopg2-binary
+pandas
+pdfplumber
+python-multipart
+aiofiles
+openpyxl
+celery
+redis
+python-dotenv

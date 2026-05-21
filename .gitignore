@@ -1,0 +1,56 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+*.eggs/
+*.log
+
+# Environment
+.env
+venv/
+ENV/
+env/
+.venv/
+
+# Odoo
+*.zip
+*.pot
+*.mo
+*.swp
+.odoo/
+.odoorc
+*.sqlite
+/config/odoo.conf
+/odoo.conf
+
+# Docker
+*.pid
+*.seed
+*.bak
+*.dump
+*.sql
+*.db
+data-db/
+db_data/
+postgres_data/
+pgadmin_data/
+logs/
+log/
+*.pid
+odoo-data
+
+# JetBrains / VSCode
+.idea/
+.vscode/
+*.code-workspace
+.deepseek
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Extra Addons compiled/built files
+extra-addons/*/static/src/js/*.bundle.js
+extra-addons/*/static/lib/

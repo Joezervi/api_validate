@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+
+    container_name: po-backend
+
+    restart: always
+
+    ports:
+      - "9000:9000"
+
+    volumes:
+      - ./backend:/app
+
+    environment:
+      DATABASE_URL:  postgresql://postgres:evNwZ4OBJYDO8t-9VHqHr@zervi-pgvector-u34072.vm.elestio.app/odoo_api
+      REDIS_URL: redis://redis:6379/0
+
+  frontend:
+    build: ./frontend
+    container_name: po-frontend
+    ports:
+      - "5100:5100"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend

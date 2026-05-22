@@ -1,8 +1,6 @@
-import asyncio
 import os
 import uuid
 
-from app.celery_app import celery
 from app.checker import process_products
 from app.parsers.factory import get_parser
 from openpyxl import Workbook
@@ -10,16 +8,13 @@ from openpyxl import Workbook
 OUTPUT_DIR = "outputs"
 
 
-@celery.task
-def process_po_task(pdf_path, customer_name, po_number=None):
+async def process_po(pdf_path, customer_name, po_number=None):
 
     parser = get_parser(customer_name)
 
     products = parser.parse(pdf_path)
 
-    result = asyncio.run(
-        process_products(products, customer_name, po_number)
-    )
+    result = await process_products(products, customer_name, po_number)
 
     workbook = Workbook()
 

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import axios from 'axios'
 import { useDropzone } from 'react-dropzone'
 
@@ -7,7 +7,6 @@ function App() {
   const [missing, setMissing] = useState([])
   const [loading, setLoading] = useState(false)
   const [excelFile, setExcelFile] = useState(null)
-  const pollingRef = useRef(null)
 
   const onDrop = async (acceptedFiles) => {
     const file = acceptedFiles[0]
@@ -23,35 +22,16 @@ function App() {
       setMissing([])
       setExcelFile(null)
 
-      // Step 1: Upload PDF and get task_id
-      const uploadRes = await axios.post('/upload-po', formData)
-      const { task_id } = uploadRes.data
+      const res = await axios.post('/upload-po', formData)
+      const result = res.data
 
-      // Step 2: Poll for task completion
-      pollingRef.current = setInterval(async () => {
-        try {
-          const taskRes = await axios.get(`/task/${task_id}`)
-          if (taskRes.data.status === 'SUCCESS' && taskRes.data.result) {
-            const result = taskRes.data.result
-            setExcelFile(result.excel_file)
-            setExisting(result.existing || [])
-            setMissing(result.missing || [])
-            setLoading(false)
-            clearInterval(pollingRef.current)
-          } else if (taskRes.data.status === 'FAILURE') {
-            setLoading(false)
-            clearInterval(pollingRef.current)
-            alert('Processing failed')
-          }
-        } catch (err) {
-          setLoading(false)
-          clearInterval(pollingRef.current)
-          alert('Polling failed')
-        }
-      }, 2000)
+      setExcelFile(result.excel_file)
+      setExisting(result.existing || [])
+      setMissing(result.missing || [])
     } catch (error) {
       console.error(error)
-      alert('Upload failed')
+      alert('Processing failed')
+    } finally {
       setLoading(false)
     }
   }

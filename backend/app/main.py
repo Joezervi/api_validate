@@ -9,10 +9,7 @@ from fastapi import Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from celery.result import AsyncResult
-
-from app.tasks import process_po_task
-from app.celery_app import celery
+from app.tasks import process_po
 
 app = FastAPI()
 
@@ -42,19 +39,9 @@ async def upload_po(
         content = await file.read()
         await out_file.write(content)
 
-    task = process_po_task.delay(pdf_path, customer_name, po_number)
+    result = await process_po(pdf_path, customer_name, po_number)
 
-    return {"task_id": task.id}
-
-
-@app.get("/task/{task_id}")
-async def get_task(task_id: str):
-    task = AsyncResult(task_id, app=celery)
-
-    return {
-        "status": task.status,
-        "result": task.result,
-    }
+    return result
 
 
 @app.get("/download/{filename}")

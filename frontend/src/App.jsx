@@ -2,6 +2,15 @@ import { useState } from 'react'
 import axios from 'axios'
 import { useDropzone } from 'react-dropzone'
 
+// ── API URL — auto-detects Docker dev vs Vercel prod ──────────────────
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
+const apiUrl = (path) => {
+  if (path.startsWith('http')) return path
+  return `${API_BASE}${path}`
+}
+
 const COLUMNS = [
   { key: 'sku',          label: 'SKU',           width: 140 },
   { key: 'barcode',      label: 'Barcode',       width: 140 },
@@ -70,7 +79,7 @@ function App() {
       setExtracted([])
       setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null)
 
-      const res = await axios.post(endpoint, formData)
+      const res = await axios.post(apiUrl(endpoint), formData)
       setExtracted(res.data.products || [])
     } catch (err) {
       console.error(err)
@@ -140,7 +149,7 @@ function App() {
       setVerifying(true)
       setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null)
 
-      const res = await axios.post('/verify-po', body)
+      const res = await axios.post(apiUrl('/verify-po'), body)
       const result = res.data
 
       setExcelFile(result.excel_file)
@@ -156,7 +165,7 @@ function App() {
   }
 
   const downloadExcel = () => {
-    if (excelFile) window.open(`/download/${excelFile}`)
+    if (excelFile) window.open(apiUrl(`/download/${excelFile}`))
   }
 
   const copyMarkdown = async () => {

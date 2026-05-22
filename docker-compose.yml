@@ -7,11 +7,13 @@ services:
     container_name: po-backend
     restart: always
     ports:
-      - "8000:8000"
+      - "9000:9000"
     volumes:
       - ./backend:/app
+    env_file:
+      - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@po-postgres:5432/pochecker
+      DATABASE_URL: ${DATABASE_URL}
     depends_on:
       - postgres
 
@@ -35,7 +37,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: pochecker
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
       - pgdata:/var/lib/postgresql/data

@@ -1,14 +1,13 @@
 # PO Checker Flow (Implemented)
 
 1. **Customer uploads PO PDF** - Frontend uses `/upload-po` FastAPI endpoint (POST)
-2. **Queue background job** - FastAPI triggers Celery task (`process_po_task`)
-3. **Parse customer PO** - Celery worker uses customer-specific parser (currently only 'zervi')
+3. **Parse customer PO** - worker uses customer-specific parser (currently only 'zervi')
 4. **Extract SKU rows** - Parser extracts SKU and product name from PDF
 5. **Insert staging data** - Each row inserted into `product_staging` table
 6. **Validate against ERP product table** - Check if SKU exists in `product_info`
 7. **Create missing product drafts** - If SKU missing, insert into `product_draft`
 8. **Create approval tasks** - Add to `approval_queue` for product team
-9. **Generate Excel report** - Celery task creates Excel with 'Existing SKU' and 'Missing SKU' sheets
+9. **Generate Excel report** - task creates Excel with 'Existing SKU' and 'Missing SKU' sheets
 10. **Frontend polls task result** - Frontend calls `/task/{task_id}` to check status
 11. **Return result** - When done, backend returns Excel filename
 12. **Preview in React UI** - Frontend displays existing/missing SKUs (if returned)
@@ -21,8 +20,6 @@
 - `GET /download/{filename}` — Download Excel report
 
 ## Background Processing
-
-- Celery + Redis for async PDF parsing and Excel generation
 - Postgres for all data storage
 
 ## Notes
@@ -37,6 +34,16 @@ DATABASE
 CREATE TABLE product_info (
     id SERIAL PRIMARY KEY,
     sku VARCHAR(100) UNIQUE,
+    barcode VARCHAR(20) UNIQUE,
+    product VARCHAR(255),
+    category VARCHAR(100),
+    customer VARCHAR(100),
+    price NUMERIC,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE product_category (
+    id SERIAL PRIMARY KEY,
     product VARCHAR(255),
     category VARCHAR(100),
     customer VARCHAR(100),

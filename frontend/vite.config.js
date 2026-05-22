@@ -8,8 +8,8 @@ export default defineConfig({
 		host: true,
 		port: 5100,
 		proxy: {
-			'/upload-po': 'http://backend:8000',
-			'/download': 'http://backend:8000',
+			'/upload-po': 'http://backend:9000',
+			'/download': 'http://backend:9000',
 		},
 	},
 });

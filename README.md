@@ -2,8 +2,6 @@ Customer uploads PO PDF
         ↓
 FastAPI upload endpoint
         ↓
-Celery background worker
-        ↓
 Customer-specific parser
         ↓
 Insert staging data

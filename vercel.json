@@ -7,26 +7,15 @@
     }
   },
   "rewrites": [
-    {
-      "source": "/upload-po",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/download/(.*)",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/docs",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/openapi.json",
-      "destination": "/api/index"
-    }
+    { "source": "/extract-po",     "destination": "/api/index" },
+    { "source": "/extract-file",   "destination": "/api/index" },
+    { "source": "/verify-po",      "destination": "/api/index" },
+    { "source": "/upload-po",      "destination": "/api/index" },
+    { "source": "/download/(.*)",   "destination": "/api/index" },
+    { "source": "/cleanup",        "destination": "/api/index" },
+    { "source": "/health",         "destination": "/api/index" },
+    { "source": "/docs",           "destination": "/api/index" },
+    { "source": "/openapi.json",   "destination": "/api/index" }
   ],
   "headers": [
     {

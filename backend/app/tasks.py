@@ -7,12 +7,12 @@ from app.parsers.factory import get_parser
 from openpyxl import Workbook
 
 
-async def process_po(pdf_path, customer_name, po_number=None):
+async def run_verification(products, customer_name, po_number=None):
+    """Run verification + Excel generation on an already-parsed product list.
 
-    parser = get_parser(customer_name)
-
-    products = parser.parse(pdf_path)
-
+    This is the core function called by /verify-po after the user has
+    reviewed/edited the extracted data in the frontend.
+    """
     result = await process_products(products, customer_name, po_number)
 
     workbook = Workbook()
@@ -49,10 +49,8 @@ async def process_po(pdf_path, customer_name, po_number=None):
         )
 
     excel_filename = f"{uuid.uuid4()}.xlsx"
-
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     excel_path = os.path.join(OUTPUT_DIR, excel_filename)
-
     workbook.save(excel_path)
 
     return {
@@ -63,3 +61,10 @@ async def process_po(pdf_path, customer_name, po_number=None):
         "existing_count": len(result["existing"]),
         "missing_count": len(result["missing"]),
     }
+
+
+async def process_po(pdf_path, customer_name, po_number=None):
+    """Parse a PO PDF, then run verification. (Backward-compatible combined flow.)"""
+    parser = get_parser(customer_name)
+    products = parser.parse(pdf_path)
+    return await run_verification(products, customer_name, po_number)

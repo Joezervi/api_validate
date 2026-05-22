@@ -6,12 +6,15 @@ from app.parsers.base import BaseParser
 # Values in column 0 that indicate a header row
 _HEADER_KEYWORDS = {"sku", "code", "item", "product", "barcode", "description"}
 
-# Column indices for Zervi PO format
+# Column indices for Zervi PO format (8 columns)
 _COL_SKU = 0
 _COL_BARCODE = 1
+_COL_SUPPLIER = 2
 _COL_PRODUCT = 3
+_COL_JOBNO = 4
 _COL_QTY = 5
 _COL_PRICE = 6
+_COL_SUBTOTAL = 7
 
 
 class ZerviParser(BaseParser):
@@ -28,142 +31,182 @@ class ZerviParser(BaseParser):
     """
 
     def parse(self, pdf_source):
-        # ── Primary: table-based extraction ──
-        products = self._parse_via_tables(pdf_source)
+        """Extract products from all pages — hybrid table + word approach.
+
+        Each page is processed independently: table extraction is tried
+        first; if it produces zero data rows, the page falls back to
+        word-position extraction.  Column ranges from the first page's
+        word detection are cached and reused for continuation pages that
+        lack a header row.
+        """
+        all_products = []
+        cached_col_ranges = None
+
+        with pdfplumber.open(pdf_source) as pdf:
+            pages = list(pdf.pages)
+            for page_num, page in enumerate(pages, start=1):
+                # Try table extraction for this page
+                page_products = self._parse_page_via_tables(page, page_num)
+
+                if not page_products:
+                    # Fall back to word-based for this page
+                    page_products = self._parse_page_via_words(
+                        page, page_num, cached_col_ranges
+                    )
+
+                all_products.extend(page_products)
+                # Cache column ranges from the first word-extracted page
+                if page_products and cached_col_ranges is None and hasattr(self, '_last_word_col_ranges'):
+                    cached_col_ranges = self._last_word_col_ranges
+
+        print(
+            f"[ZerviParser] Total: {len(all_products)} products "
+            f"across {len(pages)} pages"
+        )
+        return all_products
+
+    # ── Per-page table extraction ──────────────────────────────────────
+
+    def _parse_page_via_tables(self, page, page_num):
+        """Extract products from a SINGLE page using table extraction."""
+        products = []
+        tables = page.extract_tables()
+
+        for table in tables:
+            has_data = False
+            for row in table:
+                if not row:
+                    continue
+                if len(row) < 4:
+                    continue
+
+                sku = (row[_COL_SKU] or "").strip()
+
+                if not sku or sku.lower() in _HEADER_KEYWORDS:
+                    continue
+
+                product_name = (row[_COL_PRODUCT] or "").strip()
+                if not product_name:
+                    continue
+
+                has_data = True
+                item = self._build_item(row, sku, product_name)
+                products.append(item)
+
+            if not has_data and len(table) > 1:
+                print(
+                    f"[ZerviParser] Page {page_num}: table had {len(table)} rows "
+                    f"but zero data rows (all cells empty)"
+                )
 
         if products:
-            print(f"[ZerviParser] Table extraction produced {len(products)} products")
-            return products
-
-        # ── Fallback: word-position-based extraction ──
-        print(
-            "[ZerviParser] Table extraction empty, falling back to word-position extraction"
-        )
-        products = self._parse_via_words(pdf_source)
-        print(f"[ZerviParser] Word-based extraction produced {len(products)} products")
+            print(f"[ZerviParser] Page {page_num}: table → {len(products)} products")
         return products
 
-    # ── Table-based extraction ─────────────────────────────────────────
+    # ── Per-page word-position extraction ──────────────────────────────
 
-    def _parse_via_tables(self, pdf_source):
-        products = []
+    def _parse_page_via_words(self, page, page_num, cached_col_ranges=None):
+        """Extract products from a SINGLE page using word-position extraction.
 
-        with pdfplumber.open(pdf_source) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables:
-                    has_data = False
-                    for row in table:
-                        if not row:
-                            continue
-                        if len(row) < 4:
-                            continue
-
-                        sku = (row[_COL_SKU] or "").strip()
-
-                        if not sku or sku.lower() in _HEADER_KEYWORDS:
-                            continue
-
-                        product_name = (row[_COL_PRODUCT] or "").strip()
-                        if not product_name:
-                            continue
-
-                        has_data = True
-                        item = self._build_item(row, sku, product_name)
-                        products.append(item)
-
-                    if not has_data:
-                        # Table structure found but no text — discard
-                        print(
-                            f"[ZerviParser] Table had {len(table)} rows but zero data rows (all cells empty)"
-                        )
-
-        return products
-
-    # ── Word-position-based extraction (fallback) ──────────────────────
-
-    def _parse_via_words(self, pdf_source):
-        """Use pdfplumber's extract_words() with positional data.
-
-        Groups words into lines by Y-coordinate, identifies column
-        boundaries from the header row, then assigns words to columns
-        by X-coordinate for each data line.
+        If the page has no header (continuation of a multi-page table),
+        ``cached_col_ranges`` from a previous page are reused.
         """
         products = []
+        words = page.extract_words(
+            keep_blank_chars=True,
+            use_text_flow=True,
+        )
+        if not words:
+            return products
 
-        with pdfplumber.open(pdf_source) as pdf:
-            for page in pdf.pages:
-                words = page.extract_words(
-                    keep_blank_chars=True,
-                    use_text_flow=True,
-                )
-                if not words:
-                    continue
+        lines = self._group_words_into_lines(words, y_tolerance=5)
+        if len(lines) < 2:
+            return products
 
-                # Group words into lines by Y tolerance
-                lines = self._group_words_into_lines(words, y_tolerance=5)
-                if len(lines) < 2:
-                    continue
+        header_line, data_lines = self._split_header_data(lines)
 
-                # Find header line and data lines
-                header_line, data_lines = self._split_header_data(lines)
-                if header_line is None or not data_lines:
-                    continue
+        # Reuse cached column ranges for continuation pages (no header)
+        if data_lines and header_line is None and cached_col_ranges:
+            col_ranges = cached_col_ranges
+        elif header_line is not None:
+            col_ranges = self._build_column_ranges_from_header(header_line)
+        else:
+            return products
 
-                # Build column X-ranges from header word positions
-                col_ranges = self._build_column_ranges(header_line)
-                if len(col_ranges) < 4:
-                    continue
+        if len(col_ranges) < 4:
+            return products
 
-                print(
-                    f"[ZerviParser] Detected {len(col_ranges)} columns, {len(data_lines)} data lines"
-                )
+        # Cache for continuation pages
+        self._last_word_col_ranges = col_ranges
 
-                # Parse each data line
-                for line_words in data_lines:
-                    print(f"[ZerviParser] Parsing line with {line_words} words")
-                    row = self._words_to_columns(line_words, col_ranges)
-                    print(f"[ZerviParser] Parsed row: {row}")
-                    if not row:
-                        continue
+        # If this page has a header, skip it; otherwise all lines are data
+        if header_line is None and cached_col_ranges:
+            data_lines = lines  # all lines are data — no header on this page
 
-                    sku = row.get("sku", "")
-                    product_name = row.get("product_name", "")
-                    if not sku or not product_name:
-                        continue
+        print(
+            f"[ZerviParser] Page {page_num}: detected {len(col_ranges)} columns, "
+            f"{len(data_lines)} data lines"
+        )
 
-                    item = {
-                        "sku": sku,
-                        "product_name": product_name,
-                    }
-                    if row.get("barcode"):
-                        item["barcode"] = row["barcode"]
-                    if row.get("qty") is not None:
-                        item["qty"] = row["qty"]
-                    if row.get("unit_price") is not None:
-                        item["unit_price"] = row["unit_price"]
+        for line_words in data_lines:
+            row = self._words_to_columns(line_words, col_ranges)
+            if not row:
+                continue
 
-                    products.append(item)
+            sku = row.get("sku", "")
+            product_name = row.get("product_name", "")
+            if not sku or not product_name:
+                continue
 
+            item = {"sku": sku, "product_name": product_name}
+            for key in (
+                "barcode", "supplier_code", "job_no",
+                "qty", "unit_price", "subtotal",
+            ):
+                if row.get(key) not in (None, ""):
+                    item[key] = row[key]
+
+            products.append(item)
+
+        if products:
+            print(f"[ZerviParser] Page {page_num}: words → {len(products)} products")
         return products
 
     # ── Helpers ────────────────────────────────────────────────────────
 
     def _build_item(self, row, sku, product_name):
-        """Build a product dict from a table row."""
+        """Build a product dict from a table row with all 8 columns."""
         item = {"sku": sku, "product_name": product_name}
 
+        print(
+            f"[ZerviParser] Processing row: {row} → SKU: {sku}, Product: {product_name}"
+        )
+        # Barcode (col 1)
         if len(row) > _COL_BARCODE and row[_COL_BARCODE]:
-            barcode = str(row[_COL_BARCODE]).strip()
-            if barcode and barcode.lower() != "none":
-                item["barcode"] = barcode
+            val = str(row[_COL_BARCODE]).strip()
+            if val and val.lower() != "none":
+                item["barcode"] = val
 
+        # Supplier Code (col 2)
+        if len(row) > _COL_SUPPLIER and row[_COL_SUPPLIER]:
+            val = str(row[_COL_SUPPLIER]).strip()
+            if val and val.lower() != "none":
+                item["supplier_code"] = val
+
+        # Job No. (col 4)
+        if len(row) > _COL_JOBNO and row[_COL_JOBNO]:
+            val = str(row[_COL_JOBNO]).strip()
+            if val and val.lower() != "none":
+                item["job_no"] = val
+
+        # Qty (col 5)
         if len(row) > _COL_QTY and row[_COL_QTY]:
             try:
                 item["qty"] = int(float(str(row[_COL_QTY]).strip()))
             except (ValueError, TypeError):
                 pass
 
+        # Unit Price (col 6)
         if len(row) > _COL_PRICE and row[_COL_PRICE]:
             price_raw = str(row[_COL_PRICE]).strip().replace(",", ".")
             try:
@@ -171,15 +214,22 @@ class ZerviParser(BaseParser):
             except (ValueError, TypeError):
                 pass
 
+        # Subtotal (col 7)
+        if len(row) > _COL_SUBTOTAL and row[_COL_SUBTOTAL]:
+            subtotal_raw = str(row[_COL_SUBTOTAL]).strip().replace(",", ".")
+            try:
+                item["subtotal"] = float(re.sub(r"[^\d.]", "", subtotal_raw))
+            except (ValueError, TypeError):
+                pass
+
         return item
 
     @staticmethod
     def _group_words_into_lines(words, y_tolerance=5):
-        """Group word dicts into lines by proximity of their Y (top) coordinate."""
+        """Group word dicts into lines by proximity of Y (top) coordinate."""
         if not words:
             return []
 
-        # Sort by Y then X
         sorted_words = sorted(words, key=lambda w: (w["top"], w["x0"]))
         lines = []
         current_line = [sorted_words[0]]
@@ -189,7 +239,6 @@ class ZerviParser(BaseParser):
             if abs(w["top"] - current_y) <= y_tolerance:
                 current_line.append(w)
             else:
-                # Sort current line by X before appending
                 current_line.sort(key=lambda w: w["x0"])
                 lines.append(current_line)
                 current_line = [w]
@@ -201,7 +250,7 @@ class ZerviParser(BaseParser):
 
     @staticmethod
     def _split_header_data(lines):
-        """Identify the header line (contains known column names) and split from data."""
+        """Identify the header line and split from data."""
         header_terms = {
             "sku",
             "product",
@@ -210,6 +259,9 @@ class ZerviParser(BaseParser):
             "description",
             "qty",
             "price",
+            "supplier",
+            "job",
+            "subtotal",
         }
 
         header_idx = None
@@ -223,109 +275,163 @@ class ZerviParser(BaseParser):
         if header_idx is None:
             return None, []
 
-        header_line = lines[header_idx]
-        data_lines = lines[header_idx + 1 :]
-        return header_line, data_lines
+        return lines[header_idx], lines[header_idx + 1 :]
+
+    # Known column names in order — the FIRST word of each column header
+    _COLUMN_NAMES = [
+        "sku",          # col 0
+        "barcode",      # col 1
+        "supplier",     # col 2  (full: "Supplier Code")
+        "product",      # col 3  (full: "Product Name")
+        "job",          # col 4  (full: "Job No.")
+        "qty",          # col 5
+        "unit",         # col 6  (full: "Unit Price")
+        "subtotal",     # col 7
+    ]
 
     @staticmethod
-    def _build_column_ranges(header_line):
-        """Build (x0_min, x1_max) boundaries per column from header word positions.
+    def _build_column_ranges_from_header(header_line):
+        """Build exact 8-column boundaries by matching header words to known names.
 
-        Returns a list of dicts: {'x0': float, 'x1': float, 'text': str}
-        representing the X range each column occupies.
+        Each header word is matched against _COLUMN_NAMES.  The X0 of the
+        matched word becomes the LEFT boundary.  The RIGHT boundary is the
+        X0 of the next column (or +200 for the last).  Missing columns are
+        interpolated/extrapolated from neighbors.
         """
-        # Merge adjacent header words that belong to the same column
-        # (e.g., "Product" and "Name" should merge into one column)
-        columns = []
-        for w in header_line:
-            text = w["text"].strip()
-            if not text:
-                continue
-            columns.append(
-                {
-                    "x0": float(w["x0"]),
-                    "x1": float(w["x1"]),
-                    "text": text.lower(),
-                }
-            )
+        if not header_line:
+            return []
 
-        # Merge multi-word column headers
-        merged = []
-        i = 0
-        while i < len(columns):
-            current = columns[i]
-            # Look ahead for words that are close to this column's right edge
-            j = i + 1
-            while j < len(columns):
-                gap = columns[j]["x0"] - current["x1"]
-                if gap < 15:  # small gap — same column header
-                    current["x1"] = columns[j]["x1"]
-                    current["text"] += " " + columns[j]["text"]
-                    j += 1
-                else:
+        header_words = [
+            (float(w["x0"]), w["text"].strip().lower())
+            for w in header_line
+        ]
+
+        col_x0 = [None] * len(ZerviParser._COLUMN_NAMES)
+        word_idx = 0
+        for col_idx, col_name in enumerate(ZerviParser._COLUMN_NAMES):
+            while word_idx < len(header_words):
+                _, text = header_words[word_idx]
+                if text == col_name or text.startswith(col_name):
+                    col_x0[col_idx] = header_words[word_idx][0]
+                    word_idx += 1
                     break
-            merged.append(current)
-            i = j
+                word_idx += 1
 
-        # Now expand each column's range to include the gap up to the next column
+        # Fill gaps by interpolation
+        last_x0, last_col = None, 0
+        for i in range(len(col_x0)):
+            if col_x0[i] is not None:
+                last_x0 = col_x0[i]
+                last_col = i
+            elif last_x0 is not None:
+                next_x0, next_col = None, len(col_x0)
+                for j in range(i + 1, len(col_x0)):
+                    if col_x0[j] is not None:
+                        next_x0 = col_x0[j]
+                        next_col = j
+                        break
+                if next_x0 is not None:
+                    span = next_x0 - last_x0
+                    steps = next_col - last_col
+                    col_x0[i] = last_x0 + span * (i - last_col) / steps
+                else:
+                    col_x0[i] = last_x0 + 80 * (i - last_col)
+
         ranges = []
-        for idx, col in enumerate(merged):
-            r = {"x0": col["x0"], "text": col["text"]}
-            if idx + 1 < len(merged):
-                r["x1"] = merged[idx + 1]["x0"]
-            else:
-                r["x1"] = col["x1"] + 200  # generous right bound
-            ranges.append(r)
+        for i in range(len(col_x0)):
+            x0 = col_x0[i] if col_x0[i] is not None else (50 + i * 80)
+            x1 = (
+                col_x0[i + 1] if i + 1 < len(col_x0) and col_x0[i + 1] is not None
+                else x0 + 200
+            )
+            ranges.append({"x0": x0, "x1": x1})
 
+        print(
+            f"[ZerviParser] Header-anchored column ranges ({len(ranges)} cols): "
+            + ", ".join(f"{r['x0']:.0f}-{r['x1']:.0f}" for r in ranges)
+        )
         return ranges
 
     @staticmethod
     def _words_to_columns(line_words, col_ranges):
-        """Assign words from a data line to columns based on X-coordinate ranges.
+        """Assign words from a data line to columns by X-coordinate.
 
-        Returns a dict with keys: sku, barcode, product_name, qty, unit_price
-        or None if the line doesn't contain a valid SKU.
+        Returns a dict with all 8 column keys, or None if no SKU.
         """
         if not line_words:
             return None
 
-        # Build column text by assigning each word to the column range it falls in
         col_texts = ["" for _ in col_ranges]
+        unassigned = []
         for w in line_words:
             x_center = (float(w["x0"]) + float(w["x1"])) / 2.0
+            assigned = False
             for idx, cr in enumerate(col_ranges):
                 if cr["x0"] <= x_center < cr["x1"]:
-                    if col_texts[idx]:
-                        col_texts[idx] += " " + w["text"]
-                    else:
-                        col_texts[idx] = w["text"]
+                    col_texts[idx] = (
+                        col_texts[idx] + " " + w["text"]
+                        if col_texts[idx]
+                        else w["text"]
+                    )
+                    assigned = True
                     break
+            if not assigned:
+                unassigned.append(w["text"])
+
+        if unassigned:
+            print(f"[ZerviParser] Unassigned words: {unassigned}")
 
         result = {}
 
-        # Map known columns by index
-        if _COL_SKU < len(col_texts) and col_texts[_COL_SKU]:
-            result["sku"] = col_texts[_COL_SKU].strip()
+        def _get(idx):
+            return col_texts[idx].strip() if idx < len(col_texts) else ""
 
-        if _COL_BARCODE < len(col_texts) and col_texts[_COL_BARCODE]:
-            b = col_texts[_COL_BARCODE].strip()
-            # Barcodes: digits, dashes, spaces, letters (Code 128, EAN, UPC, etc.)
-            if b and re.match(r"^[\dA-Za-z\-\s]{5,}$", b):
-                result["barcode"] = b
+        # SKU
+        if _get(_COL_SKU):
+            result["sku"] = _get(_COL_SKU)
 
-        if _COL_PRODUCT < len(col_texts) and col_texts[_COL_PRODUCT]:
-            result["product_name"] = col_texts[_COL_PRODUCT].strip()
+        # Barcode
+        b = _get(_COL_BARCODE)
+        if b and re.match(r"^[\dA-Za-z\-\s]{5,}$", b):
+            result["barcode"] = b
 
-        if _COL_QTY < len(col_texts) and col_texts[_COL_QTY]:
+        # Supplier Code
+        if _get(_COL_SUPPLIER):
+            result["supplier_code"] = _get(_COL_SUPPLIER)
+
+        # Product Name
+        if _get(_COL_PRODUCT):
+            result["product_name"] = _get(_COL_PRODUCT)
+
+        # Job No.
+        if _get(_COL_JOBNO):
+            result["job_no"] = _get(_COL_JOBNO)
+
+        # Qty
+        qty_raw = _get(_COL_QTY)
+        if qty_raw:
             try:
-                result["qty"] = int(float(col_texts[_COL_QTY].strip()))
+                result["qty"] = int(float(qty_raw))
             except (ValueError, TypeError):
                 pass
 
-        if _COL_PRICE < len(col_texts) and col_texts[_COL_PRICE]:
-            price_raw = col_texts[_COL_PRICE].strip().replace(",", ".")
+        # Unit Price
+        price_raw = _get(_COL_PRICE)
+        if price_raw:
             try:
-                result["unit_price"] = float(re.sub(r"[^\d.]", "", price_raw))
+                result["unit_price"] = float(
+                    re.sub(r"[^\d.]", "", price_raw.replace(",", "."))
+                )
+            except (ValueError, TypeError):
+                pass
+
+        # Subtotal
+        subtotal_raw = _get(_COL_SUBTOTAL)
+        if subtotal_raw:
+            try:
+                result["subtotal"] = float(
+                    re.sub(r"[^\d.]", "", subtotal_raw.replace(",", "."))
+                )
             except (ValueError, TypeError):
                 pass
 

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 import aiofiles
@@ -17,6 +18,7 @@ from app.config import UPLOAD_DIR, OUTPUT_DIR
 from app.parsers.factory import get_parser
 from app.spreadsheet_parser import parse_spreadsheet
 from app.tasks import process_po, run_verification
+from app import task_store
 
 app = FastAPI()
 
@@ -85,6 +87,32 @@ class CleanupRequest(BaseModel):
     """Delete all files in OUTPUT_DIR."""
     all_uploads: bool = False
     """Delete all files in UPLOAD_DIR."""
+
+
+# ── Background task coroutine ──────────────────────────────────────────
+
+
+async def _process_po_task(
+    task_id: str,
+    pdf_path: str,
+    customer_name: str,
+    po_number: str | None,
+):
+    """Runs process_po in the background and updates the task store.
+
+    Called via asyncio.create_task() from the /upload-po endpoint so it
+    runs concurrently with future requests without blocking the response.
+    """
+    task_store.set_processing(task_id)
+    try:
+        result = await process_po(pdf_path, customer_name, po_number)
+        task_store.set_done(task_id, result)
+        print(f"[Task] {task_id} done: {result['existing_count']} existing, {result['missing_count']} missing")
+    except Exception as exc:
+        task_store.set_error(task_id, str(exc))
+        print(f"[Task] {task_id} failed: {exc}")
+    finally:
+        _safe_remove(pdf_path)  # always clean up the uploaded PDF
 
 
 # ── Step 1: Extract PO data (no DB, no verification) ──────────────────
@@ -175,27 +203,52 @@ async def upload_po(
     po_number: str = Form(None),
     file: UploadFile = File(...),
 ):
-    """Upload a PO PDF, parse it, and run verification in one step."""
-    filename = f"{uuid.uuid4()}.pdf"
-    pdf_path = os.path.join(UPLOAD_DIR, filename)
+    """Upload a PO PDF. Returns task_id immediately; processing runs in background.
 
-    try:
-        async with aiofiles.open(pdf_path, "wb") as out_file:
-            content = await file.read()
-            print(
-                f"Received file {file.filename} ({len(content)} bytes) → {pdf_path}"
-            )
-            await out_file.write(content)
+    Poll GET /task/{task_id} to check progress and retrieve results.
+    """
+    task_id = str(uuid.uuid4())
+    pdf_path = os.path.join(UPLOAD_DIR, f"{task_id}.pdf")
 
-        result = await process_po(pdf_path, customer_name, po_number)
-        print(
-            f"Processed PO for {customer_name}: "
-            f"{result['existing_count']} existing, "
-            f"{result['missing_count']} missing"
-        )
-        return result
-    finally:
-        _safe_remove(pdf_path)
+    async with aiofiles.open(pdf_path, "wb") as out_file:
+        content = await file.read()
+        print(f"[Upload] {file.filename} ({len(content)} bytes) → {pdf_path}")
+        await out_file.write(content)
+
+    task_store.create_task(task_id)
+    asyncio.create_task(
+        _process_po_task(task_id, pdf_path, customer_name, po_number)
+    )
+    print(f"[Upload] Started background task {task_id} for customer '{customer_name}'")
+    return {"task_id": task_id}
+
+
+# ── Task polling ────────────────────────────────────────────────────────
+
+
+@app.get("/task/{task_id}")
+async def get_task_status(task_id: str):
+    """Poll the status of a background PO processing job.
+
+    Response shapes:
+      {"status": "pending"}                          — not yet started
+      {"status": "processing"}                       — running
+      {"status": "done", "result": {...}}            — finished; result contains
+                                                       excel_file, existing, missing,
+                                                       existing_count, missing_count,
+                                                       markdown_report
+      {"status": "error", "error": "<message>"}     — failed
+    """
+    from fastapi import HTTPException
+
+    task = task_store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] == "done":
+        return {"status": "done", "result": task["result"]}
+    if task["status"] == "error":
+        return {"status": "error", "error": task["error"]}
+    return {"status": task["status"]}  # "pending" or "processing"
 
 
 # ── Static files & cleanup ──────────────────────────────────────────────

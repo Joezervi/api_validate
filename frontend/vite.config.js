@@ -22,6 +22,7 @@ export default defineConfig({
 			'/verify-po':    BACKEND,
 			'/upload-po':    BACKEND,
 			'/download':     BACKEND,
+			'/task':         BACKEND,
 			'/cleanup':      BACKEND,
 			'/health':       BACKEND,
 		},

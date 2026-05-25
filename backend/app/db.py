@@ -5,6 +5,7 @@ On Vercel: pool is created at module level and reused across warm invocations;
           cold starts get a fresh pool backed by the DATABASE_URL env var.
 """
 
+import ssl
 from urllib.parse import parse_qs, urlparse
 
 import asyncpg
@@ -14,10 +15,21 @@ _pool = None
 
 # Cloud PG providers that always require SSL
 _SSL_HOSTS = {
-    "neon.tech", "vercel", "vercel-storage", "verceldb",
-    "aws", "amazonaws.com", "rds.amazonaws.com",
-    "googleapis.com", "cloudsql", "azure.com", "digitalocean",
-    "supabase", "supabase.co", "render.com", "fly.dev",
+    "neon.tech",
+    "vercel",
+    "vercel-storage",
+    "verceldb",
+    "aws",
+    "amazonaws.com",
+    "rds.amazonaws.com",
+    "googleapis.com",
+    "cloudsql",
+    "azure.com",
+    "digitalocean",
+    "supabase",
+    "supabase.co",
+    "render.com",
+    "fly.dev",
     "elestio.app",
 }
 
@@ -26,6 +38,18 @@ def _needs_ssl(url: str) -> bool:
     """Guess whether this database URL requires SSL."""
     host = urlparse(url).hostname or ""
     return any(suffix in host for suffix in _SSL_HOSTS)
+
+
+def _make_ssl_context() -> ssl.SSLContext:
+    """Create an SSL context that does not verify the server certificate.
+
+    This is the Python equivalent of Node.js's ``{rejectUnauthorized: false}``.
+    Required for cloud providers (like Elestio) that use self-signed certs.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 def _parse_dsn(url: str) -> tuple[str, object]:
@@ -46,9 +70,9 @@ def _parse_dsn(url: str) -> tuple[str, object]:
 
     # Determine SSL kwarg
     if sslmode in ("require", "prefer", "verify-ca", "verify-full"):
-        ssl_kwarg = True if sslmode == "require" else sslmode
+        ssl_kwarg: object = _make_ssl_context()
     elif _needs_ssl(url):
-        ssl_kwarg = True  # require SSL for known cloud providers
+        ssl_kwarg = _make_ssl_context()  # require SSL for known cloud providers
     else:
         ssl_kwarg = None  # no SSL
 
@@ -69,13 +93,17 @@ async def get_pool():
             f"  ssl={ssl_kwarg}  max={max_size}  vercel={IS_VERCEL}"
         )
         print("DB URL (masked):", dsn)
-        _pool = await asyncpg.create_pool(
-            dsn,
-            min_size=1,
-            max_size=max_size,
-            ssl=ssl_kwarg,
-            command_timeout=30,
-        )
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn,
+                min_size=1,
+                max_size=max_size,
+                ssl=ssl_kwarg,
+                command_timeout=30,
+            )
+        except Exception as e:
+            print("[DB] Error creating pool:", e)
+            raise
 
     return _pool
 

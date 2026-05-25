@@ -188,11 +188,9 @@ async def _enrich_missing(
             """
             SELECT category
             FROM product_category
-            WHERE customer = $1
-              AND price = $2
+            WHERE price = $1
             LIMIT 1
             """,
-            customer_name,
             float(po_price),
         )
         if cat_rows:
@@ -204,11 +202,9 @@ async def _enrich_missing(
             SELECT category
             FROM product_category
             WHERE LOWER(product) = LOWER($1)
-              AND customer = $2
             LIMIT 1
             """,
             po_product.strip(),
-            customer_name,
         )
         if cat_rows:
             category_name = cat_rows[0]["category"]

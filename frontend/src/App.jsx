@@ -57,6 +57,7 @@ function App() {
   const [excelFile, setExcelFile] = useState(null)
   const [markdownReport, setMarkdownReport] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
   // ── Step 1: Upload → Extract ──────────────────────────────────────
 
@@ -173,6 +174,22 @@ function App() {
       await navigator.clipboard.writeText(markdownReport)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const clearOutputs = async () => {
+    try {
+      setClearing(true)
+      await axios.post(apiUrl('/cleanup'), { all_outputs: true })
+      setExisting([])
+      setMissing([])
+      setExcelFile(null)
+      setMarkdownReport(null)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to clear output files')
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -311,6 +328,11 @@ function App() {
                 {copied ? 'Copied!' : 'Copy Markdown Table'}
               </button>
             )}
+            <button onClick={clearOutputs} disabled={clearing} style={{
+              ...btnStyle, backgroundColor: clearing ? '#9ca3af' : '#dc2626'
+            }}>
+              {clearing ? 'Clearing...' : 'Clear Outputs'}
+            </button>
           </div>
 
           {markdownReport && (

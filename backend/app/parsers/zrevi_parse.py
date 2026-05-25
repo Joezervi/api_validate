@@ -44,8 +44,10 @@ class ZerviParser(BaseParser):
 
         with pdfplumber.open(pdf_source) as pdf:
             pages = list(pdf.pages)
+            print("PDF opened:", pages)
             for page_num, page in enumerate(pages, start=1):
                 # Try table extraction for this page
+                print(f"[ZerviParser] Processing page {page_num} with table extraction...")
                 page_products = self._parse_page_via_tables(page, page_num)
 
                 if not page_products:
@@ -56,7 +58,11 @@ class ZerviParser(BaseParser):
 
                 all_products.extend(page_products)
                 # Cache column ranges from the first word-extracted page
-                if page_products and cached_col_ranges is None and hasattr(self, '_last_word_col_ranges'):
+                if (
+                    page_products
+                    and cached_col_ranges is None
+                    and hasattr(self, "_last_word_col_ranges")
+                ):
                     cached_col_ranges = self._last_word_col_ranges
 
         print(
@@ -71,10 +77,12 @@ class ZerviParser(BaseParser):
         """Extract products from a SINGLE page using table extraction."""
         products = []
         tables = page.extract_tables()
-
+        print("Page Tables:", tables)
         for table in tables:
+            print("Table", table)
             has_data = False
             for row in table:
+                print("Row:", row)
                 if not row:
                     continue
                 if len(row) < 4:
@@ -160,8 +168,12 @@ class ZerviParser(BaseParser):
 
             item = {"sku": sku, "product_name": product_name}
             for key in (
-                "barcode", "supplier_code", "job_no",
-                "qty", "unit_price", "subtotal",
+                "barcode",
+                "supplier_code",
+                "job_no",
+                "qty",
+                "unit_price",
+                "subtotal",
             ):
                 if row.get(key) not in (None, ""):
                     item[key] = row[key]
@@ -279,14 +291,14 @@ class ZerviParser(BaseParser):
 
     # Known column names in order — the FIRST word of each column header
     _COLUMN_NAMES = [
-        "sku",          # col 0
-        "barcode",      # col 1
-        "supplier",     # col 2  (full: "Supplier Code")
-        "product",      # col 3  (full: "Product Name")
-        "job",          # col 4  (full: "Job No.")
-        "qty",          # col 5
-        "unit",         # col 6  (full: "Unit Price")
-        "subtotal",     # col 7
+        "sku",  # col 0
+        "barcode",  # col 1
+        "supplier",  # col 2  (full: "Supplier Code")
+        "product",  # col 3  (full: "Product Name")
+        "job",  # col 4  (full: "Job No.")
+        "qty",  # col 5
+        "unit",  # col 6  (full: "Unit Price")
+        "subtotal",  # col 7
     ]
 
     @staticmethod
@@ -302,8 +314,7 @@ class ZerviParser(BaseParser):
             return []
 
         header_words = [
-            (float(w["x0"]), w["text"].strip().lower())
-            for w in header_line
+            (float(w["x0"]), w["text"].strip().lower()) for w in header_line
         ]
 
         col_x0 = [None] * len(ZerviParser._COLUMN_NAMES)
@@ -341,7 +352,8 @@ class ZerviParser(BaseParser):
         for i in range(len(col_x0)):
             x0 = col_x0[i] if col_x0[i] is not None else (50 + i * 80)
             x1 = (
-                col_x0[i + 1] if i + 1 < len(col_x0) and col_x0[i + 1] is not None
+                col_x0[i + 1]
+                if i + 1 < len(col_x0) and col_x0[i + 1] is not None
                 else x0 + 200
             )
             ranges.append({"x0": x0, "x1": x1})

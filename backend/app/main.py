@@ -1,24 +1,18 @@
 import asyncio
 import os
 import uuid
-import aiofiles
-
-from fastapi import FastAPI
-from fastapi import UploadFile
-from fastapi import File
-from fastapi import Form
-from fastapi import Body
-from fastapi import BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from typing import Optional
 
-from app.config import UPLOAD_DIR, OUTPUT_DIR
+import aiofiles
+from app import task_store
+from app.config import OUTPUT_DIR, UPLOAD_DIR
 from app.parsers.factory import get_parser
 from app.spreadsheet_parser import parse_spreadsheet
 from app.tasks import process_po, run_verification
-from app import task_store
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -107,7 +101,9 @@ async def _process_po_task(
     try:
         result = await process_po(pdf_path, customer_name, po_number)
         task_store.set_done(task_id, result)
-        print(f"[Task] {task_id} done: {result['existing_count']} existing, {result['missing_count']} missing")
+        print(
+            f"[Task] {task_id} done: {result['existing_count']} existing, {result['missing_count']} missing"
+        )
     except Exception as exc:
         task_store.set_error(task_id, str(exc))
         print(f"[Task] {task_id} failed: {exc}")
@@ -156,9 +152,7 @@ async def extract_file(
 ):
     """Upload a CSV or Excel file, extract all 8 columns, return raw data."""
     content = await file.read()
-    print(
-        f"[Extract-File] Received {file.filename} ({len(content)} bytes)"
-    )
+    print(f"[Extract-File] Received {file.filename} ({len(content)} bytes)")
 
     products = parse_spreadsheet(content, file.filename or "")
 
@@ -216,9 +210,7 @@ async def upload_po(
         await out_file.write(content)
 
     task_store.create_task(task_id)
-    asyncio.create_task(
-        _process_po_task(task_id, pdf_path, customer_name, po_number)
-    )
+    asyncio.create_task(_process_po_task(task_id, pdf_path, customer_name, po_number))
     print(f"[Upload] Started background task {task_id} for customer '{customer_name}'")
     return {"task_id": task_id}
 
@@ -260,6 +252,7 @@ async def download_file(filename: str, background_tasks: BackgroundTasks):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.isfile(file_path):
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="File not found")
 
     # Schedule deletion after the response has been sent
@@ -303,6 +296,7 @@ async def health_check():
     """Verify database connectivity."""
     try:
         from app.db import get_pool
+
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("SELECT 1")

@@ -149,7 +149,7 @@ def parse_spreadsheet(file_bytes: bytes, filename: str) -> list[dict]:
         Each dict has keys matching the 8-column PO format.
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
+    print("File extension detected:", ext)
     if ext in ("csv", "tsv", "txt"):
         return parse_csv(file_bytes)
     elif ext in ("xlsx", "xls", "xlsm"):

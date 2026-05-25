@@ -60,6 +60,7 @@ async def get_pool():
     global _pool
 
     if _pool is None:
+        print("[DB] Initializing connection pool...", DATABASE_URL)
         dsn, ssl_kwarg = _parse_dsn(DATABASE_URL)
 
         max_size = 5 if IS_VERCEL else 20
@@ -67,7 +68,7 @@ async def get_pool():
             f"[DB] Creating pool → {dsn.split('@')[-1] if '@' in dsn else dsn}"
             f"  ssl={ssl_kwarg}  max={max_size}  vercel={IS_VERCEL}"
         )
-
+        print("DB URL (masked):", dsn)
         _pool = await asyncpg.create_pool(
             dsn,
             min_size=1,

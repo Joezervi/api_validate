@@ -1,6 +1,6 @@
 # PO Checker Flow (Implemented)
 
-1. **Customer uploads PO PDF** - Frontend uses `/upload-po` FastAPI endpoint (POST)
+1. **Customer uploads PO PDF or excel file** - Frontend uses `/upload-po` FastAPI endpoint (POST)
 3. **Parse customer PO** - worker uses customer-specific parser (currently only 'zervi')
 4. **Extract SKU rows** - Parser extracts SKU and product name from PDF
 5. **Insert staging data** - Each row inserted into `product_staging` table

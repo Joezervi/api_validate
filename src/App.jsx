@@ -1,15 +1,8 @@
-import { useState } from 'react'
-import axios from 'axios'
+import { useState, useEffect } from 'react'
+import { api, getGatewayToken, odooLogin, clearToken } from './auth.js'
 import { useDropzone } from 'react-dropzone'
 
-// ── API URL — auto-detects Docker dev vs Vercel prod ──────────────────
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-
-const apiUrl = (path) => {
-  if (path.startsWith('http')) return path
-  return `${API_BASE}${path}`
-}
+// ── Column definitions ─────────────────────────────────────────────────
 
 const COLUMNS = [
   { key: 'sku',          label: 'SKU',           width: 140 },
@@ -22,7 +15,7 @@ const COLUMNS = [
   { key: 'subtotal',     label: 'Subtotal',       width: 100 },
 ]
 
-// ── Styles ─────────────────────────────────────────────────────────────
+// ── Shared styles ──────────────────────────────────────────────────────
 
 const thStyle = {
   padding: '8px 10px', textAlign: 'left', fontWeight: 600,
@@ -43,11 +36,109 @@ const btnStyle = {
   cursor: 'pointer', fontSize: 14, fontWeight: 500, color: '#fff',
 }
 
-// ── Component ──────────────────────────────────────────────────────────
+// ── Login screen component ─────────────────────────────────────────────
+
+function LoginScreen({
+  onSubmit, username, setUsername, password, setPassword,
+  error, loading, authState,
+}) {
+  const cardStyle = {
+    maxWidth: 380, margin: '100px auto', padding: '32px 28px',
+    border: '1px solid #e5e7eb', borderRadius: 12,
+    fontFamily: 'system-ui, sans-serif',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+  }
+  const fieldStyle = {
+    display: 'block', width: '100%', border: '1px solid #d1d5db',
+    borderRadius: 6, padding: '9px 11px', fontSize: 14,
+    boxSizing: 'border-box', marginTop: 6, marginBottom: 16,
+  }
+  const labelStyle = { fontSize: 13, fontWeight: 500, color: '#374151' }
+
+  return (
+    <div style={cardStyle}>
+      <h1 style={{ fontSize: 20, marginBottom: 4, color: '#111827' }}>
+        Customer PO Checker
+      </h1>
+      <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>
+        Sign in with your Odoo credentials
+      </p>
+
+      {authState === 'init' && (
+        <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
+          Initializing…
+        </p>
+      )}
+
+      {authState === 'error' && (
+        <p style={{ color: '#dc2626', fontSize: 13, textAlign: 'center' }}>
+          Could not reach the server. Please refresh and try again.
+        </p>
+      )}
+
+      {authState === 'gateway_ready' && (
+        <form onSubmit={onSubmit}>
+          <label style={labelStyle}>Odoo Username</label>
+          <input
+            style={fieldStyle}
+            type="text"
+            autoComplete="username"
+            placeholder="admin"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            required
+            disabled={loading}
+          />
+
+          <label style={labelStyle}>Odoo Password</label>
+          <input
+            style={fieldStyle}
+            type="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            disabled={loading}
+          />
+
+          {error && (
+            <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: '100%', padding: '10px', border: 'none', borderRadius: 6,
+              backgroundColor: loading ? '#9ca3af' : '#2563eb',
+              color: '#fff', fontSize: 14, fontWeight: 500,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? 'Signing in…' : 'Sign In'}
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
+// ── Main app component ─────────────────────────────────────────────────
 
 function App() {
+  // ── Auth state
+  const [authState, setAuthState] = useState('init') // 'init'|'gateway_ready'|'logged_in'|'error'
+  const [odooUser, setOdooUser] = useState(null)
+  const [loginError, setLoginError] = useState('')
+  const [odooUsername, setOdooUsername] = useState('')
+  const [odooPassword, setOdooPassword] = useState('')
+  const [loggingIn, setLoggingIn] = useState(false)
+
   // ── Extract state
-  const [extracted, setExtracted] = useState([])       // raw parsed rows
+  const [extracted, setExtracted] = useState([])
   const [extracting, setExtracting] = useState(false)
 
   // ── Verify state
@@ -58,7 +149,53 @@ function App() {
   const [markdownReport, setMarkdownReport] = useState(null)
   const [copied, setCopied] = useState(false)
 
-  // ── Step 1: Upload → Extract ──────────────────────────────────────
+  // ── Sync state
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
+
+  // ── Silently fetch gateway JWT on mount ───────────────────────────────
+  useEffect(() => {
+    getGatewayToken()
+      .then(() => setAuthState('gateway_ready'))
+      .catch(() => setAuthState('error'))
+  }, [])
+
+  // ── Odoo login handler ────────────────────────────────────────────────
+  const handleOdooLogin = async (e) => {
+    e.preventDefault()
+    setLoggingIn(true)
+    setLoginError('')
+    try {
+      const result = await odooLogin(odooUsername, odooPassword)
+      if (result.success) {
+        setOdooUser(result)
+        setAuthState('logged_in')
+      } else {
+        setLoginError(result.message || 'Login failed')
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Invalid Odoo credentials'
+      setLoginError(detail)
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
+  // ── Logout handler ────────────────────────────────────────────────────
+  const handleLogout = () => {
+    clearToken()
+    setAuthState('gateway_ready')
+    setOdooUser(null)
+    setOdooUsername('')
+    setOdooPassword('')
+    setExtracted([])
+    setExisting([])
+    setMissing([])
+    setExcelFile(null)
+    setMarkdownReport(null)
+  }
+
+  // ── Step 1: Upload → Extract ──────────────────────────────────────────
 
   const onDrop = async (acceptedFiles) => {
     const file = acceptedFiles[0]
@@ -66,7 +203,9 @@ function App() {
 
     const ext = file.name.split('.').pop()?.toLowerCase() || ''
     const isSpreadsheet = ['csv', 'xlsx', 'xls', 'xlsm', 'tsv'].includes(ext)
-    const endpoint = isSpreadsheet ? '/extract-file' : '/extract-po'
+    const endpoint = isSpreadsheet
+      ? '/api/v1/validate/extract-file'
+      : '/api/v1/validate/extract-po'
 
     const formData = new FormData()
     formData.append('file', file)
@@ -79,7 +218,7 @@ function App() {
       setExtracted([])
       setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null)
 
-      const res = await axios.post(apiUrl(endpoint), formData)
+      const res = await api.post(endpoint, formData)
       setExtracted(res.data.products || [])
     } catch (err) {
       console.error(err)
@@ -120,10 +259,9 @@ function App() {
     setExtracted(prev => prev.filter((_, i) => i !== rowIdx))
   }
 
-  // ── Step 2: Verify ────────────────────────────────────────────────
+  // ── Step 2: Verify ────────────────────────────────────────────────────
 
   const runVerify = async () => {
-    // Filter out rows without SKU
     const products = extracted.filter(r => r.sku && r.sku.trim())
     if (!products.length) {
       alert('No rows with a SKU to verify.')
@@ -149,7 +287,7 @@ function App() {
       setVerifying(true)
       setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null)
 
-      const res = await axios.post(apiUrl('/verify-po'), body)
+      const res = await api.post('/api/v1/validate/verify-po', body)
       const result = res.data
 
       setExcelFile(result.excel_file)
@@ -164,8 +302,55 @@ function App() {
     }
   }
 
-  const downloadExcel = () => {
-    if (excelFile) window.open(apiUrl(`/download/${excelFile}`))
+  // ── Download Excel ────────────────────────────────────────────────────
+  // Uses api.get with responseType 'blob' so the Authorization header is sent.
+  // window.open() cannot attach custom headers and would receive a 401.
+
+  const downloadExcel = async () => {
+    if (!excelFile) return
+    try {
+      const res = await api.get(`/api/v1/validate/download/${excelFile}`, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = excelFile
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to download Excel report')
+    }
+  }
+
+  // ── Step 3: Sync products from Odoo ──────────────────────────────────
+
+  const runSync = async () => {
+    try {
+      setSyncing(true)
+      setSyncResult(null)
+
+      const res = await api.post('/api/v1/validate/sync-products', {}, {
+        params: {
+          customer: 'zervi',
+          login: odooUser?.odoo_username,
+        },
+      })
+
+      const d = res.data
+      setSyncResult(
+        `Synced: ${d.product_info_inserted} inserted, ${d.product_info_updated} updated (products); ` +
+        `${d.product_category_inserted} inserted (categories)`
+      )
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Sync failed'
+      setSyncResult(`Error: ${detail}`)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const copyMarkdown = async () => {
@@ -189,11 +374,72 @@ function App() {
 
   const hasResults = existing.length > 0 || missing.length > 0
 
-  // ── Render ─────────────────────────────────────────────────────────
+  // ── Show login screen until Odoo auth is complete ─────────────────────
+
+  if (authState !== 'logged_in') {
+    return (
+      <LoginScreen
+        onSubmit={handleOdooLogin}
+        username={odooUsername}
+        setUsername={setOdooUsername}
+        password={odooPassword}
+        setPassword={setOdooPassword}
+        error={loginError}
+        loading={loggingIn}
+        authState={authState}
+      />
+    )
+  }
+
+  // ── Main PO Checker UI ────────────────────────────────────────────────
 
   return (
     <div style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Customer PO Checker</h1>
+
+      {/* ── Header with user info + logout + sync ──────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <h1 style={{ fontSize: 22, margin: 0 }}>Customer PO Checker</h1>
+        <div style={{ fontSize: 13, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 10 }}>
+          Logged in as <b style={{ color: '#374151' }}>{odooUser?.odoo_username}</b>
+          <button
+            onClick={runSync}
+            disabled={syncing}
+            style={{
+              marginLeft: 8, background: syncing ? '#9ca3af' : '#0891b2',
+              border: 'none', borderRadius: 4, padding: '3px 12px',
+              cursor: syncing ? 'not-allowed' : 'pointer',
+              fontSize: 12, color: '#fff', fontWeight: 500,
+            }}
+            title="Pull latest product data from Odoo"
+          >
+            {syncing ? 'Syncing…' : 'Sync Products'}
+          </button>
+          <button
+            onClick={handleLogout}
+            style={{
+              background: 'none', border: '1px solid #d1d5db',
+              borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+              fontSize: 12, color: '#6b7280',
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* ── Sync result feedback ───────────────────────────────────── */}
+      {syncResult && (
+        <div style={{
+          marginBottom: 16, padding: '8px 14px', borderRadius: 6,
+          fontSize: 13,
+          backgroundColor: syncResult.startsWith('Error') ? '#fef2f2' : '#f0fdf4',
+          color: syncResult.startsWith('Error') ? '#dc2626' : '#059669',
+          border: `1px solid ${syncResult.startsWith('Error') ? '#fecaca' : '#bbf7d0'}`,
+        }}>
+          {syncResult}
+        </div>
+      )}
+
       <p style={{ color: '#6b7280', marginBottom: 20, fontSize: 13 }}>
         Drop a PO file (PDF, CSV, or Excel) → review &amp; edit → verify
       </p>
@@ -210,11 +456,11 @@ function App() {
       >
         <input {...getInputProps()} />
         <p style={{ margin: 0, color: '#374151', fontSize: 14 }}>
-          {extracting ? 'Extracting data...' : 'Drop a PO file (PDF, CSV, Excel) here, or click to select'}
+          {extracting ? 'Extracting data…' : 'Drop a PO file (PDF, CSV, Excel) here, or click to select'}
         </p>
       </div>
 
-      {/* ── Editable table — always visible ──────────────────────── */}
+      {/* ── Editable table ────────────────────────────────────────── */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
           <h2 style={{ fontSize: 16, margin: 0 }}>
@@ -224,14 +470,18 @@ function App() {
             + Add Row
           </button>
           {extracted.length === 0 && (
-            <button onClick={() => { addRow(); addRow(); addRow(); addRow(); addRow() }}
-              style={{ ...btnStyle, backgroundColor: '#0891b2', fontSize: 12, padding: '6px 14px' }}>
+            <button
+              onClick={() => { addRow(); addRow(); addRow(); addRow(); addRow() }}
+              style={{ ...btnStyle, backgroundColor: '#0891b2', fontSize: 12, padding: '6px 14px' }}
+            >
               Start Manual Entry
             </button>
           )}
           {extracted.length > 0 && (
-            <button onClick={() => { setExtracted([]); setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null) }}
-              style={{ ...btnStyle, backgroundColor: '#dc2626', fontSize: 12, padding: '6px 14px' }}>
+            <button
+              onClick={() => { setExtracted([]); setExisting([]); setMissing([]); setExcelFile(null); setMarkdownReport(null) }}
+              style={{ ...btnStyle, backgroundColor: '#dc2626', fontSize: 12, padding: '6px 14px' }}
+            >
               Clear Form
             </button>
           )}
@@ -244,7 +494,7 @@ function App() {
               padding: '10px 28px', fontSize: 15,
             }}
           >
-            {verifying ? 'Verifying...' : 'Verify'}
+            {verifying ? 'Verifying…' : 'Verify'}
           </button>
         </div>
 

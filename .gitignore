@@ -13,6 +13,8 @@ venv/
 ENV/
 env/
 .venv/
+.vite
+import.env
 
 # Odoo
 *.zip

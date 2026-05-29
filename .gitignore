@@ -13,6 +13,8 @@ venv/
 ENV/
 env/
 .venv/
+.vite
+import.env
 
 # Odoo
 *.zip
@@ -24,6 +26,7 @@ env/
 *.sqlite
 /config/odoo.conf
 /odoo.conf
+.vite
 
 # Docker
 *.pid

@@ -48,6 +48,17 @@ CREATE TABLE product_category (
     category VARCHAR(100),
     customer VARCHAR(100),
     price NUMERIC,
+    last_record TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE product_category (
+    id SERIAL PRIMARY KEY,
+    product VARCHAR(255),
+    category VARCHAR(100),
+    customer VARCHAR(100),
+    price NUMERIC,
+    last_record TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
 );
 

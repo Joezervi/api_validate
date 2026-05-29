@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { api, getGatewayToken, odooLogin, clearToken } from './auth.js'
+import { api, getGatewayToken, odooLogin, clearToken, saveSession, getStoredSession, clearSession, checkSession } from './auth.js'
 import { useDropzone } from 'react-dropzone'
 
 // ── Column definitions ─────────────────────────────────────────────────
@@ -154,11 +154,33 @@ function App() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
 
-  // ── Silently fetch gateway JWT on mount ───────────────────────────────
+  // ── Silently fetch gateway JWT on mount, then restore session ────────
   useEffect(() => {
-    getGatewayToken()
-      .then(() => setAuthState('gateway_ready'))
-      .catch(() => setAuthState('error'))
+    let cancelled = false
+    async function init() {
+      try {
+        await getGatewayToken()
+        // Try to restore a previous Odoo session
+        const saved = getStoredSession()
+        if (saved?.odoo_username) {
+          try {
+            const session = await checkSession(saved.odoo_username)
+            if (!cancelled) {
+              setOdooUser({ ...saved, ...session })
+              setAuthState('logged_in')
+              return
+            }
+          } catch {
+            clearSession()  // cookie expired or invalid
+          }
+        }
+        if (!cancelled) setAuthState('gateway_ready')
+      } catch {
+        if (!cancelled) setAuthState('error')
+      }
+    }
+    init()
+    return () => { cancelled = true }
   }, [])
 
   // ── Odoo login handler ────────────────────────────────────────────────
@@ -169,6 +191,7 @@ function App() {
     try {
       const result = await odooLogin(odooUsername, odooPassword)
       if (result.success) {
+        saveSession(result)
         setOdooUser(result)
         setAuthState('logged_in')
       } else {

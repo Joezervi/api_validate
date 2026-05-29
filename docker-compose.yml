@@ -1,15 +1,16 @@
-version: '3.8'
-
 services:
-
   sku-check-web:
     build: .
     container_name: sku-check-web
     ports:
       - "5100:5100"
     volumes:
-      - ./frontend:/app
+      - .:/app
       - /app/node_modules
 
-volumes:
-  pgdata:
+    networks:
+      - odoo19_odoo19-net
+
+networks:
+  odoo19_odoo19-net:
+    external: true

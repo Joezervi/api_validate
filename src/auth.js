@@ -71,6 +71,46 @@ function isTokenFresh() {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(TOKEN_EXP_KEY)
+  clearSession()
+}
+
+// ── Odoo session persistence ────────────────────────────────────────────
+
+const SESSION_KEY = 'odoo_session'
+
+/** Persist the Odoo user session in localStorage for page-refresh recovery. */
+export function saveSession(user) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    odoo_username: user.odoo_username,
+    odoo_user_id: user.odoo_user_id,
+  }))
+}
+
+/** Return the stored session object, or null if none exists. */
+export function getStoredSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+/** Remove the stored Odoo session. */
+export function clearSession() {
+  localStorage.removeItem(SESSION_KEY)
+}
+
+/**
+ * Validate a stored session against the backend.
+ * The backend reads the httponly ``odoo_token_{login}`` cookie and returns
+ * the decoded user info if it is still valid.
+ */
+export async function checkSession(login) {
+  const res = await api.get('/api/v1/odoo/session', {
+    params: { login },
+  })
+  return res.data  // { odoo_username, odoo_user_id }
 }
 
 // ── Gateway JWT fetching ───────────────────────────────────────────────
